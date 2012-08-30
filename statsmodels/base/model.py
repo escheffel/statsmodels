@@ -104,6 +104,247 @@ class Model(object):
         raise NotImplementedError
 
 
+class NonLinearLeastSquaresModel(Model):
+    """
+    Non-Linear Least Squares model is a subclass of Model.
+    """
+    def __init__(self, endog, exog=None):
+        super(NonLinearLeastSquaresModel, self).__init__(endog, exog)
+        self.initialize()
+        
+    def initialize(self):
+        """
+        Initialize (possibly re-initialize) a Model instance. For
+        instance, the design matrix of a linear model may change
+        and some things must be recomputed.
+        """
+        pass
+    
+    # TODO: if the intent is to re-initialize the model with new data then this
+    # method needs to take inputs...    
+    
+    def sumofsquares(self,params):
+        """
+        The total sum of squares of model. This is special to this subclass as we want
+        to employ non-linear least squares as our estimation method and not ML estimation.
+        """
+        raise NotImplementedError
+
+    def jacobian(self, params):
+        raise NotImplementedError
+    
+    def hessian(self, params):
+        raise NotImplementedError
+    
+    def fit(self, start_params=None, param_bounds=None, method='newton', maxiter=100,
+            full_output=True, disp=True, fargs=(), callback=None, retall=False,
+            **kwargs):
+        """
+        Fit method for residual-sum-of-squares based models. Notice that here in contrast
+        to the normal LikelihoodModel class we also allow the passing of parameter bounds
+        for constrained optimisation. The only optimisation method using this is `bfgs_b`.
+
+        Parameters
+        ----------
+        start_params : array-like, optional
+            Initial guess of the solution for the loglikelihood maximization.
+            The default is an array of zeros.
+        param_bounds : array-like, optional
+            Boundaries for contrained maximisation of the loglikelihood function.
+            The default is an array of None entries.
+        method : str {'newton','nm','bfgs','bfgs_b','powell','cg', or 'ncg'}
+            Method can be 'newton' for Newton-Raphson, 'nm' for Nelder-Mead,
+            'bfgs' for Broyden-Fletcher-Goldfarb-Shanno, 'bfgs_b' for
+            constrained Broyden-Fletcher-Goldfarb-Shanno, 'powell' for modified
+            Powell's method, 'cg' for conjugate gradient, or 'ncg' for Newton-
+            conjugate gradient. `method` determines which solver from
+            scipy.optimize is used.  The explicit arguments in `fit` are passed
+            to the solver.  Each solver has several optional arguments that are
+            not the same across solvers.  See the notes section below (or
+            scipy.optimize) for the available arguments.
+        maxiter : int
+            The maximum number of iterations to perform.
+        full_output : bool
+            Set to True to have all available output in the Results object's
+            mle_retvals attribute. The output is dependent on the solver.
+            See LikelihoodModelResults notes section for more information.
+        disp : bool
+            Set to True to print convergence messages.
+        fargs : tuple
+            Extra arguments passed to the likelihood function, i.e.,
+            loglike(x,*args)
+        callback : callable callback(xk)
+            Called after each iteration, as callback(xk), where xk is the
+            current parameter vector.
+        retall : bool
+            Set to True to return list of solutions at each iteration.
+            Available in Results object's mle_retvals attribute.
+
+        Notes
+        -----
+        Optional arguments for the solvers (available in Results.mle_settings):
+
+            'newton'
+                tol : float
+                    Relative error in params acceptable for convergence.
+            'nm' -- Nelder Mead
+                xtol : float
+                    Relative error in params acceptable for convergence
+                ftol : float
+                    Relative error in loglike(params) acceptable for
+                    convergence
+                maxfun : int
+                    Maximum number of function evaluations to make.
+            'bfgs'
+                gtol : float
+                    Stop when norm of gradient is less than gtol.
+                norm : float
+                    Order of norm (np.Inf is max, -np.Inf is min)
+                epsilon
+                    If fprime is approximated, use this value for the step
+                    size. Only relevant if LikelihoodModel.score is None.
+                    
+            'bfgs_b'
+                gtol : float
+                    Stop when norm of gradient is less than gtol.
+                norm : float
+                    Order of norm (np.Inf is max, -np.Inf is min)
+                epsilon
+                    If fprime is approximated, use this value for the step
+                    size. Only relevant if LikelihoodModel.score is None.
+                    
+            'cg'
+                gtol : float
+                    Stop when norm of gradient is less than gtol.
+                norm : float
+                    Order of norm (np.Inf is max, -np.Inf is min)
+                epsilon : float
+                    If fprime is approximated, use this value for the step
+                    size. Can be scalar or vector.  Only relevant if
+                    Likelihoodmodel.score is None.
+            'ncg'
+                fhess_p : callable f'(x,*args)
+                    Function which computes the Hessian of f times an arbitrary
+                    vector, p.  Should only be supplied if
+                    LikelihoodModel.hessian is None.
+                avextol : float
+                    Stop when the average relative error in the minimizer
+                    falls below this amount.
+                epsilon : float or ndarray
+                    If fhess is approximated, use this value for the step size.
+                    Only relevant if Likelihoodmodel.hessian is None.
+            'powell'
+                xtol : float
+                    Line-search error tolerance
+                ftol : float
+                    Relative error in loglike(params) for acceptable for
+                    convergence.
+                maxfun : int
+                    Maximum number of function evaluations to make.
+                start_direc : ndarray
+                    Initial direction set.
+                """
+        Hinv = None  # JP error if full_output=0, Hinv not defined
+        methods = ['newton', 'nm', 'bfgs', 'bfgs_b', 'powell', 'cg', 'ncg']
+        if start_params is None:
+            if hasattr(self, 'start_params'):
+                start_params = self.start_params
+            elif self.exog is not None:
+                # fails for shape (K,)?
+                start_params = [0] * self.exog.shape[1]
+            else:
+                raise ValueError("If exog is None, then start_params should "
+                                 "be specified")
+            
+        if param_bounds is None:
+            if hasattr(self, 'param_bounds'):
+                param_bounds = self.param_bounds
+            elif self.exog is not None:
+                # fails for shape (K,)?
+                param_bounds = [None] * self.exog.shape[1]
+            else:
+                raise ValueError("If exog is None, then param_bounds should "
+                                 "be specified")
+        # Alert users to the fact that when specifying bounds they can only use the 'bfgs_b' method
+        elif param_bounds != None and method != 'bfgs_b':
+            raise ValueError("If you supply param_bounds you have to choose the bfgs_b optimization method")
+
+        if method.lower() not in methods:
+            raise ValueError("Unknown fit method %s" % method)
+        method = method.lower()
+
+        # TODO: separate args from nonarg taking score and hessian, ie.,
+        # user-supplied and numerically evaluated estimate frprime doesn't take
+        # args in most (any?) of the optimize function
+
+        f = lambda params, *args: -self.loglike(params, *args)
+        score = lambda params: -self.score(params)
+        try:
+            hess = lambda params: -self.hessian(params)
+        except:
+            hess = None
+
+        fit_funcs = {
+            'newton': _fit_mle_newton,
+            'nm': _fit_mle_nm,  # Nelder-Mead
+            'bfgs': _fit_mle_bfgs,
+            'bfgs_b': _fit_mle_bfgs_b, # constrained BFGS
+            'cg': _fit_mle_cg,
+            'ncg': _fit_mle_ncg,
+            'powell': _fit_mle_powell
+        }
+
+        if method == 'newton':
+            score = lambda params: self.score(params)
+            hess = lambda params: self.hessian(params)
+
+        func = fit_funcs[method]
+        xopt, retvals = func(f, score, start_params, fargs, kwargs,
+                             disp=disp, maxiter=maxiter, callback=callback,
+                             retall=retall, full_output=full_output,
+                             hess=hess)
+
+        if not full_output:
+            xopt = retvals
+
+        # NOTE: better just to use the Analytic Hessian here, as approximation
+        # isn't great
+#        if method == 'bfgs' and full_output:
+#            Hinv = retvals.setdefault('Hinv', 0)
+        elif method == 'newton' and full_output:
+            Hinv = np.linalg.inv(-retvals['Hessian'])
+        else:
+            try:
+                Hinv = np.linalg.inv(-1 * self.hessian(xopt))
+            except:
+                #might want custom warning ResultsWarning? NumericalWarning?
+                from warnings import warn
+                warndoc = ('Inverting hessian failed, no bse or '
+                           'cov_params available')
+                warn(warndoc, Warning)
+                Hinv = None
+
+        #TODO: add Hessian approximation and change the above if needed
+        mlefit = LikelihoodModelResults(self, xopt, Hinv, scale=1.)
+
+        #TODO: hardcode scale?
+        if isinstance(retvals, dict):
+            mlefit.mle_retvals = retvals
+        if param_bounds == None:
+            optim_settings = {'optimizer': method, 'start_params': start_params,
+                              'maxiter': maxiter, 'full_output': full_output,
+                              'disp': disp, 'fargs': fargs, 'callback': callback,
+                              'retall': retall}
+        else:
+            optim_settings = {'optimizer': method, 'start_params': start_params, 'param_bounds': param_bounds,
+                              'maxiter': maxiter, 'full_output': full_output,
+                              'disp': disp, 'fargs': fargs, 'callback': callback,
+                              'retall': retall}
+        optim_settings.update(kwargs)
+        mlefit.mle_settings = optim_settings
+        return mlefit
+
+
 class LikelihoodModel(Model):
     """
     Likelihood model is a subclass of Model.
@@ -383,6 +624,32 @@ def _fit_mle_bfgs(f, score, start_params, fargs, kwargs, disp=True,
     norm = kwargs.setdefault('norm', np.Inf)
     epsilon = kwargs.setdefault('epsilon', 1.4901161193847656e-08)
     retvals = optimize.fmin_bfgs(f, start_params, score, args=fargs,
+                                 gtol=gtol, norm=norm, epsilon=epsilon,
+                                 maxiter=maxiter, full_output=full_output,
+                                 disp=disp, retall=retall, callback=callback)
+    if full_output:
+        if not retall:
+            xopt, fopt, gopt, Hinv, fcalls, gcalls, warnflag = retvals
+        else:
+            (xopt, fopt, gopt, Hinv, fcalls,
+             gcalls, warnflag, allvecs) = retvals
+        converged = not warnflag
+        retvals = {'fopt': fopt, 'gopt': gopt, 'Hinv': Hinv,
+                'fcalls': fcalls, 'gcalls': gcalls, 'warnflag':
+                warnflag, 'converged': converged}
+        if retall:
+            retvals.update({'allvecs': allvecs})
+
+    return xopt, retvals
+
+def _fit_mle_bfgs_b(f, score, start_params, param_bounds, fargs, kwargs, disp=True,
+                    maxiter=100, callback=None, retall=False,
+                    full_output=True, hess=None):
+    gtol = kwargs.setdefault('gtol', 1.0000000000000001e-05)
+    norm = kwargs.setdefault('norm', np.Inf)
+    epsilon = kwargs.setdefault('epsilon', 1.4901161193847656e-08)
+    bounds = kwargs.setdefault('bounds',len(start_params)*[[None,None],])
+    retvals = optimize.fmin_l_bfgs_b(f, start_params, score, bounds=None, args=fargs,
                                  gtol=gtol, norm=norm, epsilon=epsilon,
                                  maxiter=maxiter, full_output=full_output,
                                  disp=disp, retall=retall, callback=callback)
